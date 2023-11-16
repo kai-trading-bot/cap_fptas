@@ -5,6 +5,8 @@ from typing import *
 
 plt.style.use('seaborn-whitegrid')
 
+__author__ = 'kqureshi'
+
 def v_prime(V: float, p: float, u: float) -> float:
     return (V - (p * u)) / (1 - p)
 
