@@ -3,9 +3,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import *
 
-plt.style.use('seaborn-whitegrid')
+HOME = '/Users/kq/Documents/cap_fptas/'
 
-__author__ = 'kqureshi'
+plt.style.use('seaborn-whitegrid')
 
 def v_prime(V: float, p: float, u: float) -> float:
     return (V - (p * u)) / (1 - p)
@@ -83,16 +83,50 @@ def get_value_function(prob: pd.DataFrame,
 def run_value_function(prob: pd.DataFrame,
                        T: float,
                        K: int, 
-                       eps: float) -> None:
+                       eps: float,
+                       utility_power: Optional[List[float]] = None) -> None:
     print('Running FPTAS for T={}, K={}'.format(T,K))
     if 'RU' in list(prob.columns):
         prob = prob.drop('RU', axis=1)
-    v_star = get_vstar(prob=prob, T=T, K=K, eps=eps)
-    print('V* is {}'.format(v_star))
-    tprob = trim_probabilities(prob=prob, K=K, V_star=v_star, eps=eps)
-    value_function = get_value_function(prob=tprob, T=T, K=K)
-    plt.plot(value_function)
-    plt.title('Value Function vs. Number of Schools')
-    plt.ylabel('Probability')
-    plt.xlabel('Num Schools')
-    plt.show()
+    if isinstance(utility_power, list):
+        blockPrint()
+        for j in utility_power:
+            prob['UTILITY'] = 1 / (prob.PROBABILITY)**(j)
+            prob.UTILITY += np.random.randn(len(prob.UTILITY)) / 10
+            prob['EU'] = prob.PROBABILITY * prob.UTILITY
+            prob = prob.sort_values('EU', ascending=False).reset_index(drop=True)
+            if 'RU' in list(prob.columns):
+                prob = prob.drop('RU', axis=1)
+            v_star = get_vstar(prob=prob, T=T, K=K, eps=eps)
+            print('V* is {}'.format(v_star))
+            tprob = trim_probabilities(prob=prob, K=K, V_star=v_star, eps=eps)
+            value_function = get_value_function(prob=tprob, T=T, K=K)
+            plt.plot(value_function, label = 'n={}'.format(float(j)))
+        plt.title('Value Function vs. Number of Schools')
+        plt.ylabel('Probability')
+        plt.xlabel('Num Schools')
+        plt.legend()
+        plt.show()
+        enablePrint()
+    
+    else:
+        
+        v_star = get_vstar(prob=prob, T=T, K=K, eps=eps)
+        print('V* is {}'.format(v_star))
+        tprob = trim_probabilities(prob=prob, K=K, V_star=v_star, eps=eps)
+        value_function = get_value_function(prob=tprob, T=T, K=K)
+        plt.plot(value_function)
+        plt.title('Value Function vs. Number of Schools')
+        plt.ylabel('Probability')
+        plt.xlabel('Num Schools')
+        plt.show()
+        
+import sys, os
+
+# Disable
+def blockPrint():
+    sys.stdout = open(os.devnull, 'w')
+
+# Restore
+def enablePrint():
+    sys.stdout = sys.__stdout__        
