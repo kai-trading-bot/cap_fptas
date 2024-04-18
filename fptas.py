@@ -1,132 +1,127 @@
-import pandas as pd
+import os
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import *
+import pprint
+import pandas as pd
+import seaborn as sns
+import warnings
+from itertools import combinations
 
-HOME = '/Users/kq/Documents/cap_fptas/'
+HOME = os.environ['HOME'] + '/Documents/cap_fptas/'
 
 plt.style.use('seaborn-whitegrid')
+warnings.filterwarnings("ignore")
 
-def v_prime(V: float, p: float, u: float) -> float:
-    return (V - (p * u)) / (1 - p)
 
-def get_vstar(prob: pd.DataFrame,
-              T: float,
-              K: int,
-              eps: float) -> float:
-    
+def get_vstar(prob: pd.DataFrame, T: float) -> float:
+
+    """
+    Fetch school with highest utility that satisfies risk
+    :param prob:
+    :param T:
+    :return:
+    """
     select = prob[prob.PROBABILITY >= T].sort_values('UTILITY', ascending=False).reset_index(drop=True)
-    num, _, p_c, u_c, eu_c = select.iloc[0]
-    school_ids = [num]
-    F = p_c
-    V = eu_c
-    num, _, p_c, u_c, eu_c = prob.iloc[0]
-    # Assign the probability to F based on expected utility
-    F_step = F + p_c if V <= eu_c else F
+    if len(select) > 1:
+        select = select.iloc[0]
+        return select.loc['UTILITY'] * select.loc['PROBABILITY']
+    return 1
 
-    # Add school if expected utility increases
-    if F_step > 0:
-        school_ids.append(num)
 
-    # V' is the utility of the schools before the latest addition    
-    g_c = v_prime(V=eu_c, p=p_c, u=u_c)
+def get_delta(v_star: float, eps: float, K: int) -> float:
+    """
+    d = (epsilon x V*) / K
+    :param v_star:
+    :param eps:
+    :param K:
+    :return:
+    """
+    return (v_star * eps) / K
 
-    # Compare probability before and after potential addition
-    F_new = max(F, p_c + ((1 - p_c) * F_step))
-    V_star = V + eu_c
-    return V_star
 
-def trim_probabilities(prob: pd.DataFrame, 
-                       K: int,
-                       V_star: float,
-                       eps: float) -> pd.DataFrame:
+def rounding(eu: float, delta: float) -> float:
+    """
+    Multiples of delta
+    RU = (U / d) x d
+    :param eu:
+    :param delta:
+    :return:
+    """
+    return np.round(eu / delta) * delta
 
-    delta = eps * V_star / K
-    print('Delta is {}'.format(delta))
-    prob['RU'] = np.round(prob.UTILITY / delta) * delta
-    error = delta * K, eps * V_star
-    print('Total error bounded in {}'.format(error))
-    return prob
 
-def get_value_function(prob: pd.DataFrame,
-                       T: float,
-                       K: int) -> List[float]:
-    
-    schools, utility, rejection_probs, admission_probs = [], [], [], []
-    V = V_star
-    max_prob = prob.PROBABILITY.max()
+def fptas(prob: pd.DataFrame,
+          n: int,
+          m: int,
+          T: float,
+          K: int,
+          eps: float,
+          verbose: bool = False) -> pd.DataFrame:
+    """
+    Fully polynomial time approximation scheme
+    :param prob:
+    :param n:
+    :param m:
+    :param T:
+    :param K:
+    :param eps:
+    :param verbose:
+    :return:
+    """
+    # Initialize hashmap
+    F, G = {}, {}
+    F[0, 0, 0] = 0
+    G[0, 0, 0] = 0
 
-    if max_prob >= T:
-        tray = prob[prob.PROBABILITY >= T].sort_values(['PROBABILITY', 'UTILITY'], ascending=[True,False])
-        safety_school = tray.iloc[0]
-        num, sid, p, u, e, re = safety_school.values
-        schools.append(num)
-        utility.append(re)
-        rejection_probs.append(1-p)
-        acceptance = 1 - np.product(rejection_probs)
-        print('Added safety school {}. Current acceptance probability {}'.format(num, acceptance))
-        admission_probs.append(acceptance)
-    j = 0
-    while len(schools) < K:
-        risky = prob.sort_values('UTILITY', ascending=False)
-        num, sid, p, u, e, re = risky.iloc[j].values
-        schools.append(num)
-        rejection_probs.append(1-p)
-        vprime = (V - (p * re)) / (1-p)
-        utility.append((p * re) + ((1-p) * vprime))
-        acceptance = 1 - np.product(rejection_probs)
-        admission_probs.append(acceptance)
-        print('Added risky school {}. Current probability {}. Current V {}'.format(num, acceptance, (p * re) + ((1-p) * vprime)))
-        j+=1    
-    return admission_probs
+    # Get v* and delta from settings
+    v_star = get_vstar(prob=prob, T=T, K=K, eps=eps)
+    delta = get_delta(v_star=v_star, eps=eps, K=K)
 
-def run_value_function(prob: pd.DataFrame,
-                       T: float,
-                       K: int, 
-                       eps: float,
-                       utility_power: Optional[List[float]] = None) -> None:
-    print('Running FPTAS for T={}, K={}'.format(T,K))
-    if 'RU' in list(prob.columns):
-        prob = prob.drop('RU', axis=1)
-    if isinstance(utility_power, list):
-        blockPrint()
-        for j in utility_power:
-            prob['UTILITY'] = 1 / (prob.PROBABILITY)**(j)
-            prob.UTILITY += np.random.randn(len(prob.UTILITY)) / 10
-            prob['EU'] = prob.PROBABILITY * prob.UTILITY
-            prob = prob.sort_values('EU', ascending=False).reset_index(drop=True)
-            if 'RU' in list(prob.columns):
-                prob = prob.drop('RU', axis=1)
-            v_star = get_vstar(prob=prob, T=T, K=K, eps=eps)
-            print('V* is {}'.format(v_star))
-            tprob = trim_probabilities(prob=prob, K=K, V_star=v_star, eps=eps)
-            value_function = get_value_function(prob=tprob, T=T, K=K)
-            plt.plot(value_function, label = 'n={}'.format(float(j)))
-        plt.title('Value Function vs. Number of Schools')
-        plt.ylabel('Probability')
-        plt.xlabel('Num Schools')
-        plt.legend()
-        plt.show()
-        enablePrint()
-    
-    else:
-        
-        v_star = get_vstar(prob=prob, T=T, K=K, eps=eps)
-        print('V* is {}'.format(v_star))
-        tprob = trim_probabilities(prob=prob, K=K, V_star=v_star, eps=eps)
-        value_function = get_value_function(prob=tprob, T=T, K=K)
-        plt.plot(value_function)
-        plt.title('Value Function vs. Number of Schools')
-        plt.ylabel('Probability')
-        plt.xlabel('Num Schools')
-        plt.show()
-        
-import sys, os
+    for n in range(1, K + 1):
+        for m in range(1, n + 1):
+            if m == 1:
+                sub = prob.head(n)
+                for _, _, p, _, eu in sub.values:
+                    rounded_utility = rounding(eu=eu, delta=delta)
 
-# Disable
-def blockPrint():
-    sys.stdout = open(os.devnull, 'w')
+                    # F[n, 1, u_i] = p_i
+                    # F[n, 1, u > u_max] = 0
+                    F[n, m, rounded_utility] = p
+                    F[n, m, np.ceil(rounded_utility)] = 0
+                    G[n, m, eu] = p
+            else:
+                sub = prob.head(n)
+                indices = list(sub.index)
+                combos = list(combinations(indices, m))
 
-# Restore
-def enablePrint():
-    sys.stdout = sys.__stdout__        
+                # Check all possible combinations
+                for combo in combos:
+                    combo = list(combo)
+                    tray = sub.loc[combo]
+                    rest = tray.iloc[:-1]
+                    last = tray.iloc[[-1]]
+                    _, _, lp, _, leu = last.values[0]
+
+                    # p_i + (q_i * (prod[k=1, k=i-1](1 - q_k)))
+                    # u_i + (q_i * sum[k=1, k=i-1]u_k)
+                    total_probability = lp + ((1 - lp) * (1 - (1 - rest.PROBABILITY).prod()))
+                    utility = (rest.EU.sum() * (1 - lp)) + leu
+                    rounded_utility = rounding(utility, delta=delta)
+
+                    # F[n, m, u_i] = p_i
+                    # F[n, m, u > u_max] = 0
+                    F[n, m, rounded_utility] = total_probability
+                    F[n, m, np.ceil(rounded_utility)] = 0
+                    G[n, m, utility] = total_probability
+    if verbose:
+        pprint.pprint(F)
+
+    # Compare to non-rounding version.
+    approx = pd.Series(F).to_frame().reset_index()
+    approx.columns = ['n', 'm', 'ru', 'p']
+    exact = pd.Series(G).to_frame().reset_index()
+    exact.columns = ['n', 'm', 'u', 'p']
+    check = exact.merge(approx, on=['n', 'm', 'p'])
+    check['err'] = (check.ru - check.u).abs()
+    check = check[(check.ru != 0)]
+    return check.groupby(['n', 'm']).last()
